@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gabor Patch Viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #fafafa;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+    }
+
+    .controls {
+      width: 320px;
+      padding: 1em;
+      box-sizing: border-box;
+      background: #ffffff;
+      border-right: 1px solid #ccc;
+      overflow-y: auto;
+      box-shadow: 4px 0 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .controls h2, .controls h3 {
+      margin-top: 0;
+      color: #333;
+    }
+
+    .display {
+      flex-grow: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: black;
+    }
+
+    canvas {
+      max-width: 100%;
+      height: auto;
+    }
+
+    label {
+      display: block;
+      margin: 1em 0 0.3em;
+      color: #555;
+      font-weight: 500;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 0.75em;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9em;
+      background-color: #f9f9f9;
+      box-sizing: border-box;
+      resize: vertical;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+    }
+
+    button {
+      display: block;
+      width: 100%;
+      margin-top: 1em;
+      padding: 0.75em;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        flex-direction: column;
+      }
+
+      .controls {
+        width: 100%;
+        order: 2;
+        box-shadow: none;
+        border-right: none;
+        border-top: 1px solid #ccc;
+      }
+
+      .display {
+        order: 1;
+        aspect-ratio: 1 / 1;
+        width: 100%;
+        height: auto;
+      }
+
+      canvas {
+        width: 100%;
+        height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="controls">
+      <h2>Gabor Patch Settings</h2>
+      <label>Orientation: <input type="range" id="orientation" min="0" max="180" step="1" value="45"></label>
+      <label>Frequency: <input type="range" id="frequency" min="0.01" max="0.2" step="0.005" value="0.05"></label>
+      <label>Contrast: <input type="range" id="contrast" min="0" max="1" step="0.01" value="1"></label>
+      <label>Phase: <input type="range" id="phase" min="0" max="360" step="1" value="0"></label>
+
+      <h3>Animation Setpoints</h3>
+      <textarea id="setpointsArea" rows="8">[
+  {"orientation": 0, "frequency": 0.05, "contrast": 1, "phase": 0},
+  {"orientation": 90, "frequency": 0.1, "contrast": 0.8, "phase": 90},
+  {"orientation": 45, "frequency": 0.02, "contrast": 0.5, "phase": 180}
+]</textarea>
+      <button onclick="startCycle()">Start Cycle</button>
+    </div>
+
+    <div class="display">
+      <canvas id="gaborCanvas" width="512" height="512"></canvas>
+    </div>
+  </div>
+
+  <script>
+    window.onload = () => {
+      const canvas = document.getElementById('gaborCanvas');
+      const ctx = canvas.getContext('2d');
+      const size = canvas.width;
+
+      function drawGabor(orientationDeg, frequency, contrast, phaseDeg) {
+        const imageData = ctx.createImageData(size, size);
+        const data = imageData.data;
+
+        const orientation = orientationDeg * Math.PI / 180;
+        const phase = phaseDeg * Math.PI / 180;
+        const sigma = size / 6;
+
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const x0 = x - size / 2;
+            const y0 = y - size / 2;
+            const xr = x0 * Math.cos(orientation) + y0 * Math.sin(orientation);
+            const gaussian = Math.exp(-(x0 * x0 + y0 * y0) / (2 * sigma * sigma));
+            const sinusoid = Math.cos(2 * Math.PI * frequency * xr + phase);
+            const gabor = 128 + 127 * contrast * gaussian * sinusoid;
+            const i = (y * size + x) * 4;
+            data[i] = data[i + 1] = data[i + 2] = gabor;
+            data[i + 3] = 255;
+          }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+      }
+
+      function getCurrentInputs() {
+        return [
+          parseFloat(document.getElementById('orientation').value),
+          parseFloat(document.getElementById('frequency').value),
+          parseFloat(document.getElementById('contrast').value),
+          parseFloat(document.getElementById('phase').value)
+        ];
+      }
+
+      function update(orientation, frequency, contrast, phase) {
+        document.getElementById('orientation').value = orientation;
+        document.getElementById('frequency').value = frequency;
+        document.getElementById('contrast').value = contrast;
+        document.getElementById('phase').value = phase;
+        drawGabor(orientation, frequency, contrast, phase);
+      }
+
+      document.querySelectorAll('input[type=range]').forEach(input => {
+        input.addEventListener('input', () => {
+          const [orientation, frequency, contrast, phase] = getCurrentInputs();
+          drawGabor(orientation, frequency, contrast, phase);
+        });
+      });
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      let animationRunning = false;
+      let stopAnimation = false;
+
+      async function startCycle() {
+        if (animationRunning) {
+          stopAnimation = true;
+          animationRunning = false;
+          updateButtonText();
+          return;
+        }
+
+        let area = document.getElementById('setpointsArea');
+        let setpoints;
+        try {
+          setpoints = JSON.parse(area.value);
+        } catch (e) {
+          alert('Invalid JSON in setpoints!');
+          return;
+        }
+
+        animationRunning = true;
+        stopAnimation = false;
+        updateButtonText();
+
+        const duration = 2000;
+        const steps = 60;
+
+        while (animationRunning) {
+          for (let i = 0; i < setpoints.length; i++) {
+            const from = setpoints[i];
+            const to = setpoints[(i + 1) % setpoints.length];
+
+            for (let j = 0; j <= steps; j++) {
+              if (stopAnimation) return;
+
+              const t = j / steps;
+              const interp = {
+                orientation: lerp(from.orientation, to.orientation, t),
+                frequency: lerp(from.frequency, to.frequency, t),
+                contrast: lerp(from.contrast, to.contrast, t),
+                phase: lerp(from.phase, to.phase, t),
+              };
+              update(interp.orientation, interp.frequency, interp.contrast, interp.phase);
+              await new Promise(r => setTimeout(r, duration / steps));
+            }
+          }
+        }
+      }
+
+      function updateButtonText() {
+        const button = document.querySelector("button[onclick='startCycle()']");
+        button.textContent = animationRunning ? 'Stop Cycle' : 'Start Cycle';
+      }
+
+      window.startCycle = startCycle;
+
+      update(45, 0.05, 1, 0);
+    };
+  </script>
+</body>
+</html>
