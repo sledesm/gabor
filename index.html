@@ -37,9 +37,11 @@
     .display {
       flex-grow: 1;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       background: black;
+      padding-bottom: 1em; /* Add padding at the bottom for the button */
     }
 
     canvas {
@@ -83,6 +85,16 @@
       font-size: 1em;
       cursor: pointer;
       transition: background-color 0.3s ease;
+    }
+
+    /* Desktop view: Set a max-width for the button */
+    @media (min-width: 769px) {
+      button {
+        width: auto;
+        max-width: 200px; /* Set a max-width for the button */
+        margin-left: auto;
+        margin-right: auto;
+      }
     }
 
     button:hover {
@@ -131,11 +143,11 @@
   {"orientation": 90, "frequency": 0.1, "contrast": 0.8, "phase": 90},
   {"orientation": 45, "frequency": 0.02, "contrast": 0.5, "phase": 180}
 ]</textarea>
-      <button onclick="startCycle()">Start Cycle</button>
     </div>
 
     <div class="display">
       <canvas id="gaborCanvas" width="512" height="512"></canvas>
+      <button onclick="startCycle()">Start Cycle</button>
     </div>
   </div>
 
