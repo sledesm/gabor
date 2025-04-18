@@ -171,12 +171,11 @@
 
         <h3>Animation Setpoints</h3>
         <textarea id="setpointsArea" rows="8">
-[
-        {"orientation": 0, "frequency": 0.05, "contrast": 1, "phase": 0},
-        {"orientation": 90, "frequency": 0.1, "contrast": 0.8, "phase": 90},
-        {"orientation": 180, "frequency": 0.02, "contrast": 0.5, "phase": 180},
-        {"orientation": 270, "frequency": 0.02, "contrast": 0.5, "phase": 180}
-      ]</textarea
+          [
+          {"orientation": 0, "frequency": 0.05, "contrast": 1, "phase": 0},
+          {"orientation": 90, "frequency": 0.1, "contrast": 0.8, "phase": 90},
+          {"orientation": 180, "frequency": 0.02, "contrast": 0.5, "phase": 180}
+        ]</textarea
         >
       </div>
 
@@ -251,11 +250,11 @@
 
         // Function to calculate the shortest angular distance between two angles
         function shortestAngleDiff(from, to) {
-          let diff = (to - from) % 360;
-          if (diff < -180) {
-            diff += 360;
-          } else if (diff > 180) {
-            diff -= 360;
+          let diff = (to - from) % 180;
+          if (diff < -90) {
+            diff += 180;
+          } else if (diff > 90) {
+            diff -= 180;
           }
           return diff;
         }
@@ -303,7 +302,7 @@
 
                 const t = j / steps;
                 const interp = {
-                  orientation: from.orientation + angleDiff * t, // Adjusted for shortest path
+                  orientation: (from.orientation + angleDiff * t) % 180, // Adjusted for shortest path
                   frequency: lerp(from.frequency, to.frequency, t),
                   contrast: lerp(from.contrast, to.contrast, t),
                   phase: lerp(from.phase, to.phase, t),
