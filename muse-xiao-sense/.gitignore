@@ -1,1 +1,7 @@
 __pycache__/
+# west workspace and builds (see README.md)
+/.west/
+/zephyr/
+/modules/
+/build/
+/build-*/

@@ -1,190 +1,179 @@
-# Muse gadget: Seeed XIAO nRF52840 Sense
+# Muse gadget firmware for the Seeed XIAO nRF52840 Sense
 
-Firmware that makes a [Seeed XIAO nRF52840 Sense](https://wiki.seeedstudio.com/XIAO_BLE/)
-into a Muse gadget, built to work with the
-[Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk).
+A port of the [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk)
+device firmware to the **Seeed XIAO nRF52840 Sense**, on Zephyr.
 
-## Why there's a bridge
+The XIAO is the gadget. It speaks the same protocols as the SDK's ESP32
+firmware, so the Muse app treats it the same way:
 
-A Muse gadget keeps its own encrypted connection to Muse over Wi-Fi
-(a Noise session over `wss://`). The SDK's firmware is written for ESP32
-chips, which have Wi-Fi. The nRF52840 has Bluetooth LE only, so it can't run
-that firmware or reach Muse by itself.
+- it advertises as **`MuseGadgetXXXXXX`** with the SDK's setup GATT service,
+- it pairs with the Muse app using **pairing protocol v5** (community mode,
+  P-256 ECDH, HKDF-SHA256, AES-256-GCM records), and gets its Wi-Fi network
+  and device tokens from the app,
+- it holds its **own encrypted Noise XX session** to your Muse VM
+  (`wss://…/v1/noise`, then `/link-control`), registers its commands and
+  serves `link.invoke`, and posts messages with `/chat/stream`,
+- it rotates its device token and reconnects with backoff, like the SDK's
+  service loop.
 
-So the XIAO acts as a BLE sensor, and a machine running the SDK's
-[Linux gadget](https://github.com/facebookincubator/muse-gadget-sdk/tree/main/linux)
-(a Raspberry Pi, for example) connects it to Muse:
+The Noise client is the SDK's own `noise_core` (C++, unchanged). Pairing, setup,
+the device API and the link session are ported from the SDK's reference code
+(`linux/src/musegadget/` and `esp32/main/`).
 
+## The one extra part: a Wi-Fi chip
+
+A Muse gadget needs an IP connection to reach Muse, and the nRF52840 has
+Bluetooth but no Wi-Fi. So the XIAO gets a Wi-Fi coprocessor on its UART: any
+ESP32 or ESP8266 running Espressif's stock **ESP-AT** firmware. It acts only as
+a network interface (like an Ethernet chip): Zephyr's ESP-AT driver drives it
+from the XIAO, and TLS, the Noise session, the pairing keys and the tokens all
+stay on the XIAO. There is no computer or bridge in the loop.
+
+A **Seeed XIAO ESP32-C3** is the natural partner: same size, and it can sit
+under the Sense.
+
+### Wiring (XIAO nRF52840 Sense ↔ XIAO ESP32-C3)
+
+| XIAO nRF52840 Sense | XIAO ESP32-C3 (ESP-AT) | |
+|---|---|---|
+| D6 (TX, P1.11) | D4 (GPIO6, AT RX) | UART, 115200 8N1 |
+| D7 (RX, P1.12) | D5 (GPIO7, AT TX) | |
+| GND | GND | |
+| 5V | 5V | power both from the nRF's USB-C |
+| D1 (optional) | — | push button to GND |
+
+Flash the ESP32-C3 once with Espressif's prebuilt ESP-AT firmware for ESP32-C3
+(v2.x–v4.x, from the [ESP-AT releases](https://github.com/espressif/esp-at/releases),
+`esptool.py write_flash 0 factory_*.bin`). Its AT port is UART1 on GPIO6 (RX)
+and GPIO7 (TX). The XIAO doesn't use hardware flow control: if your AT build
+has it on, turn it off once from a serial terminal on that port with
+`AT+UART_DEF=115200,8,1,0,0`.
+
+Other ESP-AT modules (ESP-01/ESP8266 with AT 2.x, an ESP32 dev board) work the
+same way: their AT TX to D7, AT RX to D6.
+
+## Build
+
+You need the [Zephyr SDK](https://docs.zephyrproject.org/latest/develop/toolchains/zephyr_sdk.html)
+(0.17.x) and `west` (`pip install west`). From this directory:
+
+```sh
+west init -l firmware              # this directory becomes the west workspace
+west update --narrow -o=--depth=1  # Zephyr 4.2 plus the modules it uses
+pip install -r zephyr/scripts/requirements-base.txt
+firmware/build.sh mgst_…           # your SDK token from gadgets.muse.ai
 ```
-XIAO nRF52840 Sense ──BLE──▶ xiao_sense_bridge.py ──▶ musegadget (Linux SDK) ──wss──▶ Muse
-   IMU, mic, battery,          read / led on a           system.run, send-user-msg
-   RGB LED, button             local socket
-```
 
-- Muse **reads the sensors** and **sets the LED** by running
-  `xiao_sense_bridge.py read` or `xiao_sense_bridge.py led ...` through the
-  gadget's existing `system.run` command. The SDK needs no changes.
-- **Events** (button press, long press, shake, free fall) reach Muse as
-  messages, via `musegadget send-user-msg`, the same way the SDK's
-  `examples/pebble_ring_bridge.py` works.
+The firmware lands in `build/xiao/zephyr/zephyr.uf2`. The SDK token is
+compiled in (`CONFIG_MUSE_SDK_TOKEN`); every gadget needs one to pair. Never
+commit it.
 
-## What's here
+`dist/muse_xiao_sense.uf2` is a prebuilt image **without** an SDK token, for
+trying it out; it logs a warning, and will stop pairing once Muse requires
+tokens.
+
+## Flash
+
+1. Plug the XIAO in over USB-C and double-tap its **RESET** button. A drive
+   called `XIAO-SENSE` appears.
+2. Copy the `.uf2` onto it. The board restarts into the firmware.
+
+The log is on the XIAO's USB serial port (115200 baud). To go back to Seeed's
+firmware, double-tap RESET and copy theirs.
+
+## Set it up with Muse
+
+As with the SDK's ESP32 boards:
+
+1. The light **breathes orange**: ready for setup.
+2. In the Muse app, turn on **Settings > Devices > Developer mode**, then add
+   a device (**Settings > Devices > Add Device**). Pick `MuseGadgetXXXXXX`
+   (the same digits as `homelink-xxxxxx` in the log).
+3. While the app pairs, the light **breathes blue**. Choose your Wi-Fi network
+   when asked; the list comes from the ESP-AT module's scan.
+4. The light **blinks yellow** while it joins Wi-Fi and connects, then shows a
+   short **green blip** every few seconds once Muse has registered it.
+   **Red blinks** mean it's offline and retrying.
+
+Pairing, the network and the tokens are kept in flash, so it reconnects by
+itself after a restart. To set it up again, remove it in the Muse app (the
+gadget forgets the pairing and restarts into setup), or hold the D1 button for
+5 seconds.
+
+## What Muse can do with it
+
+| Command | What it does |
+|---|---|
+| `device.health` | Battery level, voltage and charging, uptime, version, Wi-Fi network |
+| `motion.read` | Acceleration (g) and rotation (°/s) from the LSM6DS3TR-C, which way up the board is, whether it's moving, chip temperature |
+| `sound.level` | Listens with the PDM microphone for 0.1–5 s and reports RMS, peak and dBFS. No audio is kept or sent |
+| `light.set` | Sets the RGB LED: a colour name or `#RRGGBB`, `solid`, `blink` or `breathe`; `off` gives it back to the status pattern |
+
+The gadget also tells Muse when something happens, as a message from the
+device (like `musegadget send-user-msg`): the D1 button is clicked or held, the
+board is shaken, or it detects a free fall.
+
+Ask things like *"How loud is it in the office?"*, *"Is my XIAO's battery
+low?"*, *"Turn the XIAO light purple and make it breathe."*
+
+## How it's built
 
 | Path | What it is |
 |---|---|
-| `dist/muse_xiao_sense.uf2` | Prebuilt firmware. Drag it onto the XIAO's USB drive. |
-| `dist/muse_xiao_sense_dfu.zip` | The same firmware as a DFU package, for `adafruit-nrfutil`. |
-| `firmware/muse_xiao_sense/` | The Arduino sketch. |
-| `firmware/build.sh` | Rebuilds `dist/` with `arduino-cli`. |
-| `bridge/xiao_sense_bridge.py` | The bridge daemon and its command-line client. |
-| `bridge/xiao-sense-bridge.service` | A systemd unit for the bridge. |
-| `bridge/test_xiao_sense_bridge.py` | Tests for the bridge, no Bluetooth needed. |
+| `firmware/src/ble_gatt.c` | Setup GATT service and advertisement (same UUIDs, `0xFFFF` paired flag, name in scan response) |
+| `firmware/src/ble_framing.c`, `setup.c` | Chunked framing and the setup commands (`get_device_info`, `pairing_*`, `wifi_scan`, `provision_v2`), from `ble_setup.py` |
+| `firmware/src/pairing.c` | Pairing v5: transcript, key schedule, record encryption, generations and timeouts, from `pairing.py` |
+| `firmware/src/net.c`, `https.c`, `muse_api.c` | Wi-Fi join/scan, TLS sockets pinned to DigiCert Global Root G2 (the root of `api.muse.ai` and `hatch.metaaivm.com`), `/fetch_vms` and `/device_token/refresh` |
+| `firmware/src/link.cpp` | The Noise link session on the SDK's `noise_core`: upgrade, handshake, `link.register`, invokes, chat, keepalive |
+| `firmware/src/service.c` | Reconnect loop, token rotation, unpairing, from `service.py` |
+| `firmware/src/commands.c`, `board_xiao.c` | Commands and the XIAO hardware (IMU, PDM mic, battery ADC and charge pin, PWM RGB LED, D1 button, shake and free-fall detection) |
+| `firmware/src/mem.c` | One fixed 100 KB heap for cJSON, mbedTLS and the session buffers, with peak-use logging |
+| `firmware/lib/noise_core` | The SDK's Noise core, unchanged (Apache-2.0, Meta) |
+| `firmware/lib/cjson` | cJSON 1.7.18 (MIT) |
 
-## 1. Flash the XIAO
+It registers with `platform: esp32`, `device_family: link`,
+`model_id: esp-link` (`CONFIG_MUSE_REGISTER_*`): the XIAO uses the SDK ESP32
+firmware's pairing model (`hatch_link`) and control protocol, so it presents
+the profile Muse already knows for it.
 
-1. Plug the XIAO into your computer over USB-C.
-2. Double-tap the tiny **RESET** button. A USB drive called `XIAO-SENSE`
-   appears and the LED pulses green.
-3. Copy `dist/muse_xiao_sense.uf2` onto the drive. It reboots by itself.
-
-The LED then blips **blue** every two seconds while it waits for the bridge,
-and **green** once the bridge is connected. The board advertises as
-`MuseXiao-XXXX`. The USB serial port (115200 baud) logs what it's doing.
-
-To build it yourself instead, install
-[`arduino-cli`](https://arduino.github.io/arduino-cli/) and
-`pip install adafruit-nrfutil`, then run `firmware/build.sh`. It uses the
-**Seeed nRF52 Boards** core 1.1.13 (board *Seeed XIAO nRF52840 Sense*, not the
-mbed-enabled one) and the *Seeed Arduino LSM6DS3* library 2.0.7. You can also
-open the sketch in the Arduino IDE with those selected.
-
-### Optional button
-
-The XIAO's only button is RESET. To send button events, wire a push button
-between **D1** and **GND**. A click sends `button`, holding it for a second
-sends `button_long`.
-
-## 2. Set up the Linux gadget
-
-On the machine that will bridge the XIAO (it needs Bluetooth LE and has to be
-within range of the XIAO), install the Muse Linux gadget and pair it with the
-Muse app, as its
-[README](https://github.com/facebookincubator/muse-gadget-sdk/tree/main/linux)
-describes:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/facebookincubator/muse-gadget-sdk/main/linux/install.sh -o install.sh
-bash install.sh --sdk-token mgst_…
-```
-
-## 3. Run the bridge
-
-```sh
-sudo mkdir -p /opt/xiao-sense
-sudo cp bridge/xiao_sense_bridge.py /opt/xiao-sense/
-sudo python3 -m venv /opt/xiao-sense/venv
-sudo /opt/xiao-sense/venv/bin/pip install bleak
-```
-
-Edit `User=` in `bridge/xiao-sense-bridge.service` to the account the
-`musegadget` service runs commands as (the account you installed it for). That
-account needs to be in the musegadget socket's group to send events, and it's
-the one Muse's commands run as, so it can use the bridge socket. Then:
-
-```sh
-sudo cp bridge/xiao-sense-bridge.service /etc/systemd/system/
-sudo systemctl enable --now xiao-sense-bridge
-journalctl -u xiao-sense-bridge -f     # "connected to MuseXiao-XXXX"
-```
-
-Check it:
-
-```sh
-/opt/xiao-sense/xiao_sense_bridge.py read
-/opt/xiao-sense/xiao_sense_bridge.py led purple --mode breathe
-/opt/xiao-sense/xiao_sense_bridge.py led off
-```
-
-`read` and `led` need only the system Python. With more than one XIAO around,
-pin the bridge to one with `run --address AA:BB:CC:DD:EE:FF`
-(`xiao_sense_bridge.py scan` lists them).
-
-## 4. Use it from Muse
-
-Tell Muse about it once, for example:
-
-> My Pi has a XIAO sensor. Run `/opt/xiao-sense/xiao_sense_bridge.py read`
-> to get its readings (battery, motion, temperature, sound level) and
-> `/opt/xiao-sense/xiao_sense_bridge.py led COLOUR [--mode blink|breathe]` to set
-> its light. When I say the sensor was shaken or pressed, that came from it.
-
-Then ask things like:
-
-> How loud is it in the room right now?
-
-> Is the XIAO's battery low?
-
-> Turn the XIAO's light red and make it blink.
-
-Events arrive in your main Muse chat. To keep them in their own side chat,
-set `XIAO_SENSE_SESSION_ID` in the service file to any UUID.
-
-`read` prints JSON like this:
-
-```json
-{
-  "ok": true,
-  "device": "MuseXiao-3F2A",
-  "battery": {"voltage_v": 3.912, "percent": 72, "charging": false},
-  "button_down": false,
-  "uptime_s": 812,
-  "event_count": 4,
-  "temperature_c": 27.31,
-  "accel_g": {"x": 0.012, "y": -0.031, "z": 0.998},
-  "gyro_dps": {"x": 0.4, "y": -0.2, "z": 0.1},
-  "orientation": "+z up",
-  "sound": {"rms": 412, "peak": 3120, "level_dbfs": -38.0}
-}
-```
-
-`orientation` names the board axis facing up; `+z up` is lying flat with
-the components on top. The temperature is the IMU chip's, which runs a
-little above the room's.
-
-## BLE interface
-
-One primary service, `9a3e0000-6b1f-4c3a-9e2d-4d7573655853`, plus the
-standard Battery (0x180F) and Device Information (0x180A) services. All
-values are little-endian.
-
-| Characteristic | UUID | Access | Value |
-|---|---|---|---|
-| State | `9a3e0001-…` | read, notify (2 Hz) | 28 bytes, below |
-| LED | `9a3e0002-…` | write | `r, g, b[, mode]`; mode 0 solid, 1 blink, 2 breathe. All zero hands the LED back to the status blips. |
-| Event | `9a3e0003-…` | notify | `u8 type, u8 0, u16 seq, u32 uptime_ms`; type 1 button, 2 long press, 3 shake, 4 free fall |
-
-State:
-
-| Offset | Type | Field |
-|---|---|---|
-| 0 | u8 | version (1) |
-| 1 | u8 | flags: 0x01 IMU ok, 0x02 mic ok, 0x04 charging, 0x08 button down |
-| 2 | u16 | battery, mV (0 with no battery) |
-| 4 | i16 | temperature, 0.01 °C |
-| 6 | i16 ×3 | acceleration x, y, z, milli-g |
-| 12 | i16 ×3 | rotation x, y, z, 0.1 °/s |
-| 18 | u16 | sound RMS over the last 500 ms, 0–32767 |
-| 20 | u16 | sound peak over the last 500 ms |
-| 22 | u32 | uptime, s |
-| 26 | u16 | events sent since boot |
+Memory: the nRF52840 has 256 KB of RAM and no PSRAM, so the session uses the
+buffer sizes of the SDK's smallest ESP32 profile (M5Stack Cardputer). A live
+session (TLS plus Noise) peaks at about 78 KB of the 100 KB heap, measured in
+the test below on a 64-bit host, which overstates the 32-bit chip.
 
 ## Tests
 
+`firmware/tests/test_e2e_sim.py` runs the real firmware, built for Zephyr's
+`native_sim`, against three fakes built from the SDK's own Python reference
+code:
+
+- **the Muse app**: pairs with protocol v5 using the SDK's `build_transcript`,
+  `derive_session_keys` and record encryption, then scans and provisions,
+- **the Muse API** over TLS,
+- **a Muse VM** over TLS that runs the SDK's `NoiseXXResponder`.
+
+native_sim has no radio, so the setup packets go over TCP instead of GATT,
+and a test CA stands in for DigiCert. Everything else (pairing, TLS, Noise,
+storage, the service loop, the heap budget) is the code that runs on the XIAO.
+It checks: pairing and provisioning, token rotation with the SDK token,
+default-VM choice, `link.register` and its commands, every command's result,
+a chat message from a button press, `link.unpaired` resetting to setup, the
+pairing surviving a restart, bad tokens failing setup, a tampered record being
+rejected, and the session staying up across keepalive pings.
+
 ```sh
-cd bridge && python3 -m unittest -v
+pip install -e <muse-gadget-sdk>/linux pytest
+west build -b native_sim/native/64 firmware -d build/sim
+MUSE_SIM_EXE=build/sim/zephyr/zephyr.exe pytest firmware/tests -v
 ```
 
-They cover decoding the state and events, encoding LED commands, and the
-bridge socket with a fake BLE connection. The firmware was compiled but has
-not been run on hardware yet, so treat thresholds like shake sensitivity as
-starting points.
+## Status
+
+- Builds for `xiao_ble/nrf52840/sense` (446 KB flash, 96% of RAM statically
+  assigned, most of it the gadget heap) and passes the end-to-end test above.
+- **Not yet run on a physical board.** The parts the simulator can't cover,
+  the Bluetooth radio, the ESP-AT link and the sensor drivers, are built from
+  Zephyr's drivers but haven't met real hardware. The shake and free-fall
+  thresholds are starting points.
+- Not ported from the ESP32 firmware: OTA updates, the home-network tunnel,
+  displays and voice.

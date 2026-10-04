@@ -1,0 +1,91 @@
+mainmenu "Muse gadget for the Seeed XIAO nRF52840 Sense"
+
+menu "Muse gadget"
+
+config MUSE_SDK_TOKEN
+	string "Muse Gadgets SDK token"
+	default ""
+	help
+	  Your SDK token (mgst_...) from gadgets.muse.ai > Account > SDK tokens.
+	  Every gadget needs one to pair. Never commit it.
+
+config MUSE_FW_VERSION
+	string "Firmware version reported to Muse"
+	default "1.0.0"
+
+config MUSE_DISPLAY_NAME
+	string "Name shown in Muse"
+	default "XIAO nRF52840 Sense"
+
+config MUSE_API_BASE
+	string "Muse API base URL, used when the app sends none"
+	default "https://api.muse.ai"
+
+config MUSE_NOISE_HOST
+	string "Muse Noise host, used when the app sends none"
+	default "hatch.metaaivm.com"
+
+config MUSE_REGISTER_PLATFORM
+	string "platform sent in link.register"
+	default "esp32"
+	help
+	  The XIAO speaks the same pairing and control protocols as the SDK's
+	  ESP32 firmware ("hatch_link" pairing model), so it registers with the
+	  same platform, device family and model id that Muse already knows.
+
+config MUSE_REGISTER_MODEL_ID
+	string "model_id sent in link.register"
+	default "esp-link"
+
+config MUSE_ROOT_CA_FILE
+	string "Root CA (DER) that the Muse endpoints must chain to"
+	default "certs/digicert_global_root_g2.der"
+	help
+	  DigiCert Global Root G2 signs api.muse.ai and hatch.metaaivm.com.
+	  The native_sim test substitutes its own CA for local fakes.
+
+config MUSE_ALLOW_PLAINTEXT
+	bool "Allow http:// and ws:// endpoints (tests only)"
+	help
+	  For the native_sim end-to-end test against local fakes. Never enable
+	  it on hardware: setup secrets and device tokens would cross the
+	  network unencrypted.
+
+config MUSE_SETUP_OVER_TCP
+	bool "Serve BLE setup over a TCP socket instead (tests only)"
+	help
+	  native_sim has no Bluetooth; this carries the exact GATT packet
+	  stream over TCP so a test can play the Muse app.
+
+config MUSE_SETUP_TCP_PORT
+	int "TCP port for setup in tests"
+	depends on MUSE_SETUP_OVER_TCP
+	default 7700
+
+config MUSE_NET_WIFI
+	bool "Join Wi-Fi with the credentials from setup"
+	default y if WIFI
+	help
+	  With a Wi-Fi interface (ESP-AT module on the XIAO's UART), setup
+	  joins the network the Muse app picks. Without one, the device uses
+	  whatever network it already has and offers it as the only choice,
+	  like the SDK's Linux gadget.
+
+config MUSE_BOARD_XIAO
+	bool "XIAO nRF52840 Sense hardware (IMU, microphone, LED, battery)"
+	default y if BOARD_XIAO_BLE
+
+config MUSE_HEAP_SIZE
+	int "Bytes for the gadget's heap (cJSON, mbedTLS, Noise buffers)"
+	default 102400
+	help
+	  A live session holds a TLS connection (16 KB receive record buffer)
+	  and the Noise session buffers (~44 KB). The log reports the peak.
+
+config MUSE_BUTTON_FACTORY_RESET_S
+	int "Hold the D1 button this long to forget the pairing"
+	default 5
+
+endmenu
+
+source "Kconfig.zephyr"
